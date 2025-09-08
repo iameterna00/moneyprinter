@@ -4,7 +4,7 @@ import re
 from uuid import uuid4
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from eleven import ttselv
+from autotts import tts_hf
 from search import search_for_stock_videos
 from termcolor import colored
 from moviepy.config import change_settings
@@ -33,7 +33,7 @@ CORS(app)
 # Constants
 HOST = "0.0.0.0"
 PORT = 8080
-AMOUNT_OF_STOCK_VIDEOS = 1
+AMOUNT_OF_STOCK_VIDEOS = 3
 GENERATING = False
 
 # Directory for storing all generated videos
@@ -137,25 +137,26 @@ def generate():
         # ============================
         # Generate TTS
         # ============================
-        sentences = [s for s in script.split(". ") if s]
-        audio_clips = []
-        for sentence in sentences:
-            current_tts_path = f"../temp/{uuid4()}.mp3"
-            ttselv(sentence, filename=current_tts_path)
-            audio_clips.append(AudioFileClip(current_tts_path))
 
-        final_audio = concatenate_audioclips(audio_clips)
+        # Save the full script as one TTS clip
         tts_path = f"../temp/{uuid4()}.mp3"
-        final_audio.write_audiofile(tts_path)
+        tts_hf(script, output_file=tts_path)
+        final_audio = AudioFileClip(tts_path)
 
         # ============================
         # Generate subtitles
         # ============================
         try:
-            subtitles_path = generate_subtitles(audio_path=tts_path, sentences=sentences, audio_clips=audio_clips, voice=voice_prefix)
+            subtitles_path = generate_subtitles(
+                audio_path=tts_path,
+                sentences=[script],  # pass as single-element list
+                audio_clips=[final_audio],
+                voice=voice_prefix
+            )
         except Exception as e:
             print(colored(f"[-] Error generating subtitles: {e}", "red"))
             subtitles_path = None
+
 
         # ============================
         # Create video

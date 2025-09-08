@@ -43,96 +43,45 @@ def generate_response(prompt: str, ai_model: str = "deepseek-chat") -> str:
     return data["choices"][0]["message"]["content"]
 
 
-
-
-def generate_script(video_subject: str, paragraph_number: int, ai_model: str, voice: str, customPrompt: str) -> str:
-
+def generate_script(video_subject: str, paragraph_number: str, ai_model: str, voice: str, customPrompt: str = None) -> str:
     """
-    Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
-
-
-
-    Args:
-
-        video_subject (str): The subject of the video.
-
-        paragraph_number (int): The number of paragraphs to generate.
-
-        ai_model (str): The AI model to use for generation.
-
-
-
-    Returns:
-
-        str: The script for the video.
-
+    Generate a single-paragraph script for a video.
     """
-
-    # Build prompt
-    
     if customPrompt:
         prompt = customPrompt
     else:
-        prompt = """
-            Generate a script for a video, depending on the subject of the video.
-
-            The script is to be returned as a string with the specified number of paragraphs.
-
-            Here is an example of a string:
-            "This is an example string."
-
-            Do not under any circumstance reference this prompt in your response.
-
-            Get straight to the point, don't start with unnecessary things like, "welcome to this video".
-
-            Obviously, the script should be related to the subject of the video.
-
-            YOU MUST NOT INCLUDE ANY TYPE OF MARKDOWN OR FORMATTING IN THE SCRIPT, NEVER USE A TITLE.
-            YOU MUST WRITE THE SCRIPT IN THE LANGUAGE SPECIFIED IN [LANGUAGE].
-            ONLY RETURN THE RAW CONTENT OF THE SCRIPT. DO NOT INCLUDE "VOICEOVER", "NARRATOR" OR SIMILAR INDICATORS OF WHAT SHOULD BE SPOKEN AT THE BEGINNING OF EACH PARAGRAPH OR LINE. YOU MUST NOT MENTION THE PROMPT, OR ANYTHING ABOUT THE SCRIPT ITSELF. ALSO, NEVER TALK ABOUT THE AMOUNT OF PARAGRAPHS OR LINES. JUST WRITE THE SCRIPT.
-
-        """
-
-    prompt += f"""
-    
-    Subject: {video_subject}
-    Number of paragraphs: {paragraph_number}
-    Language: {voice}
-
+        prompt = f"""
+        Generate a continuous story-like script for a video about: {video_subject}.
+        The script should be a single flowing paragraph.
+        Use simple, clear language.
+        Do not include titles, markdown, or line breaks.
+        Do not mention the AI, the prompt, or the number of paragraphs.
+        Just write the story directly.
+        character limit is :300 characters
+        Subject: {video_subject}
+        Language: {voice}
+        paragraph:{paragraph_number}
     """
+    
+  
 
-    # Generate script
+
     response = generate_response(prompt, ai_model)
 
-    print(colored(response, "cyan"))
-
-    # Return the generated script
     if response:
-        # Clean the script
-        # Remove asterisks, hashes
-        response = response.replace("*", "")
-        response = response.replace("#", "")
+        # Clean the script from markdown or extra characters
+        response = response.replace("*", "").replace("#", "")
+        response = re.sub(r"\[.*?\]", "", response)
+        response = re.sub(r"\(.*?\)", "", response)
 
-        # Remove markdown syntax
-        response = re.sub(r"\[.*\]", "", response)
-        response = re.sub(r"\(.*\)", "", response)
-
-        # Split the script into paragraphs
-        paragraphs = response.split("\n\n")
-
-        # Select the specified number of paragraphs
-        selected_paragraphs = paragraphs[:paragraph_number]
-
-        # Join the selected paragraphs into a single string
-        final_script = "\n\n".join(selected_paragraphs)
-
-        # Print to console the number of paragraphs used
-        print(colored(f"Number of paragraphs used: {len(selected_paragraphs)}", "green"))
-
+        # Remove unnecessary newlines and keep it as a single paragraph
+        final_script = " ".join(response.split())
+        print('final script', final_script)
         return final_script
     else:
         print(colored("[-] GPT returned an empty response.", "red"))
         return None
+
 
 
 def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str) -> List[str]:
@@ -168,7 +117,7 @@ def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str
     
     The search terms must be related to the subject of the video.
     Here is an example of a JSON-Array of strings:
-    ["search term 1", "search term 2", "search term 3"]
+    ["search term "]
 
     For context, here is the full text:
     {script}
@@ -222,7 +171,7 @@ def get_image_search_terms(video_subject: str, amount: int, script: str, ai_mode
     - Include characters, environment, mood, lighting, and perspective.
     - Be unique and cover different parts of the story/script.
     
-    Return strictly as a JSON array of strings.
+    Return strictly as a JSON array of strings. Do not include explanations, code fences, or extra formatting. Output only the JSON.
     Video script context (first 500 chars): "{script[:500]}..."
     """
     

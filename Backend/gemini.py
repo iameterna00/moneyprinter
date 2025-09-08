@@ -16,30 +16,22 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 # Initialize Hugging Face client
 client = InferenceClient(
     provider="hf-inference",  
-    api_key='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',
+    api_key='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',
 )
 
-def generate_hf_images(prompt: str, amount: int = 2, model: str = "black-forest-labs/FLUX.1-schnell") -> List[str]:
-    """Generate images using Hugging Face Inference API."""
-    image_paths = []
+def generate_hf_images(prompt: str, model: str = "black-forest-labs/FLUX.1-schnell") -> str:
+    output_dir = os.path.join(os.path.dirname(__file__), "../temp")
+    os.makedirs(output_dir, exist_ok=True)
 
-    for i in range(amount):
-        print(colored(f"[+] Generating image {i+1}/{amount} for: {prompt}", "blue"))
-
-        try:
-            # output is a PIL.Image object
-            image = client.text_to_image(prompt, model=model)
-
-            # Save image to temporary file
-            temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            image.save(temp_file.name, "PNG")
-            image_paths.append(temp_file.name)
-            print(colored(f"[+] Saved image {i+1} -> {temp_file.name}", "green"))
-
-        except Exception as e:
-            print(colored(f"[-] Error generating image {i+1}: {e}", "red"))
-
-    return image_paths
+    try:
+        image = client.text_to_image(prompt, model=model)
+        file_path = os.path.join(output_dir, f"{uuid4()}.png")
+        image.save(file_path, "PNG")
+        print(colored(f"[+] Saved image -> {file_path}", "green"))
+        return file_path
+    except Exception as e:
+        print(colored(f"[-] Error generating image: {e}", "red"))
+        return None
 
 
 def create_video_from_images(image_paths: List[str], duration: float) -> str:

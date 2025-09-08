@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from datetime import timedelta
 from moviepy.video.fx.all import crop
 from moviepy.video.tools.subtitles import SubtitlesClip
+from moviepy.config import change_settings
+change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 
 load_dotenv("../.env")
 
@@ -255,3 +257,30 @@ def generate_video(
 
     print(colored(f"[+] Final video saved as {final_video_path}", "green"))
     return final_video_path
+if __name__ == "__main__":
+    # Test input files
+    video_files = [
+        "../temp/a7a9b011-088c-4c00-8ed8-5d9ae9a6ce5e.mp4",
+        "../temp/82fb6aa6-40e6-4fe3-8ffa-7c8c317f3c87.mp4"
+    ]
+    tts_file = "../temp/460edbfa-8796-4912-88cb-72da783f3589.mp3"
+    sentences = ["Hello world", "This is a test"]
+    voice = "en"
+    max_duration = 60
+    max_clip_duration = 30
+    threads = 4
+    subtitles_position = "center,bottom"
+    text_color = "#FFFFFF"
+
+    print(colored("[*] Combining videos...", "blue"))
+    combined_video = combine_videos(video_files, max_duration, max_clip_duration, threads)
+
+    print(colored("[*] Generating subtitles...", "blue"))
+    # Create dummy AudioFileClip list for local subtitle generation
+    audio_clips = [AudioFileClip(tts_file).subclip(i, i+1) for i in range(len(sentences))]  
+    subtitles_path = generate_subtitles(tts_file, sentences, audio_clips, voice)
+
+    print(colored("[*] Creating final video with subtitles and audio...", "blue"))
+    final_video = generate_video(combined_video, tts_file, subtitles_path, threads, subtitles_position, text_color)
+
+    print(colored(f"[+] Test finished. Final video: {final_video}", "green"))
