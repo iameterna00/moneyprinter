@@ -4,7 +4,7 @@ import uuid
 import requests
 import srt_equalizer
 import assemblyai as aai
-
+import whisper
 from typing import List
 from moviepy.editor import *
 from termcolor import colored
@@ -39,107 +39,45 @@ def save_video(video_url: str, directory: str = "../temp") -> str:
     return video_path
 
 
-def __generate_subtitles_assemblyai(audio_path: str, voice: str) -> str:
+def __generate_subtitles_whisper(audio_path: str, model_size: str = "base") -> str:
     """
-    Generates subtitles from a given audio file and returns the path to the subtitles.
-
-    Args:
-        audio_path (str): The path to the audio file to generate subtitles from.
-
-    Returns:
-        str: The generated subtitles
+    Generates subtitles from a given audio file using local Whisper.
     """
-
-    language_mapping = {
-        "br": "pt",
-        "id": "en", #AssemblyAI doesn't have Indonesian 
-        "jp": "ja",
-        "kr": "ko",
-    }
-
-    if voice in language_mapping:
-        lang_code = language_mapping[voice]
-    else:
-        lang_code = voice
-
-    aai.settings.api_key = ASSEMBLY_AI_API_KEY
-    config = aai.TranscriptionConfig(language_code=lang_code)
-    transcriber = aai.Transcriber(config=config)
-    transcript = transcriber.transcribe(audio_path)
-    subtitles = transcript.export_subtitles_srt()
-
-    return subtitles
-
-
-def __generate_subtitles_locally(sentences: List[str], audio_clips: List[AudioFileClip]) -> str:
-    """
-    Generates subtitles from a given audio file and returns the path to the subtitles.
-
-    Args:
-        sentences (List[str]): all the sentences said out loud in the audio clips
-        audio_clips (List[AudioFileClip]): all the individual audio clips which will make up the final audio track
-    Returns:
-        str: The generated subtitles
-    """
-
     def convert_to_srt_time_format(total_seconds):
-        # Convert total seconds to the SRT time format: HH:MM:SS,mmm
-        if total_seconds == 0:
-            return "0:00:00,0"
-        return str(timedelta(seconds=total_seconds)).rstrip('0').replace('.', ',')
+        h, remainder = divmod(int(total_seconds), 3600)
+        m, s = divmod(remainder, 60)
+        ms = int((total_seconds - int(total_seconds)) * 1000)
+        return f"{h:01}:{m:02}:{s:02},{ms:03}"
 
-    start_time = 0
+    print(colored(f"[+] Transcribing locally with Whisper ({model_size})...", "blue"))
+    model = whisper.load_model(model_size)
+    result = model.transcribe(audio_path, word_timestamps=False, fp16=False)
+
     subtitles = []
-
-    for i, (sentence, audio_clip) in enumerate(zip(sentences, audio_clips), start=1):
-        duration = audio_clip.duration
-        end_time = start_time + duration
-
-        # Format: subtitle index, start time --> end time, sentence
-        subtitle_entry = f"{i}\n{convert_to_srt_time_format(start_time)} --> {convert_to_srt_time_format(end_time)}\n{sentence}\n"
-        subtitles.append(subtitle_entry)
-
-        start_time += duration  # Update start time for the next subtitle
+    for i, seg in enumerate(result["segments"], start=1):
+        start = convert_to_srt_time_format(seg["start"])
+        end = convert_to_srt_time_format(seg["end"])
+        text = seg["text"].strip()
+        subtitles.append(f"{i}\n{start} --> {end}\n{text}\n")
 
     return "\n".join(subtitles)
 
 
-def generate_subtitles(audio_path: str, sentences: List[str], audio_clips: List[AudioFileClip], voice: str) -> str:
+def generate_subtitles(audio_path: str, model_size: str = "base") -> str:
     """
-    Generates subtitles from a given audio file and returns the path to the subtitles.
-
-    Args:
-        audio_path (str): The path to the audio file to generate subtitles from.
-        sentences (List[str]): all the sentences said out loud in the audio clips
-        audio_clips (List[AudioFileClip]): all the individual audio clips which will make up the final audio track
-
-    Returns:
-        str: The path to the generated subtitles.
+    Generates subtitles from an audio file using Whisper locally.
     """
-
-    def equalize_subtitles(srt_path: str, max_chars: int = 10) -> None:
-        # Equalize subtitles
+    def equalize_subtitles(srt_path: str, max_chars: int = 10):
         srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
 
-    # Save subtitles
     subtitles_path = f"../subtitles/{uuid.uuid4()}.srt"
 
-    if ASSEMBLY_AI_API_KEY is not None and ASSEMBLY_AI_API_KEY != "":
-        print(colored("[+] Creating subtitles using AssemblyAI", "blue"))
-        subtitles = __generate_subtitles_assemblyai(audio_path, voice)
-    else:
-        print(colored("[+] Creating subtitles locally", "blue"))
-        subtitles = __generate_subtitles_locally(sentences, audio_clips)
-        # print(colored("[-] Local subtitle generation has been disabled for the time being.", "red"))
-        # print(colored("[-] Exiting.", "red"))
-        # sys.exit(1)
+    subtitles = __generate_subtitles_whisper(audio_path, model_size=model_size)
 
-    with open(subtitles_path, "w") as file:
-        file.write(subtitles)
+    with open(subtitles_path, "w", encoding="utf-8") as f:
+        f.write(subtitles)
 
-    # Equalize subtitles
     equalize_subtitles(subtitles_path)
-
     print(colored("[+] Subtitles generated.", "green"))
 
     return subtitles_path

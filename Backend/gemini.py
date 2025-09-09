@@ -16,7 +16,7 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 # Initialize Hugging Face client
 client = InferenceClient(
     provider="hf-inference",  
-    api_key='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',
+    api_key='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',
 )
 
 def generate_hf_images(prompt: str, model: str = "black-forest-labs/FLUX.1-schnell") -> str:
@@ -34,30 +34,66 @@ def generate_hf_images(prompt: str, model: str = "black-forest-labs/FLUX.1-schne
         return None
 
 
-def create_video_from_images(image_paths: List[str], duration: float) -> str:
-    """Create a video from generated images."""
-    if not image_paths:
-        raise ValueError("No images provided for video creation")
-
-    clip_duration = max(3.0, duration / len(image_paths))
+def create_video_from_images(image_paths, image_prompts_with_timing, audio_duration):
+    """
+    Create a video from images with precise timing based on image prompts with timing
+    """
+    from moviepy.editor import ImageClip, concatenate_videoclips, ColorClip, CompositeVideoClip
+    
     clips = []
-
-    for path in image_paths:
-        try:
-            clip = ImageClip(path).set_duration(clip_duration)
-            clips.append(clip)
-        except Exception as e:
-            print(colored(f"[-] Error processing image {path}: {e}", "red"))
-
-    if not clips:
-        raise ValueError("No valid clips created from images")
-
-    final_clip = concatenate_videoclips(clips, method="compose")
+    
+    # If we have fewer images than segments, we need to reuse some images
+    if len(image_paths) < len(image_prompts_with_timing):
+        # Repeat images to match the number of segments
+        repeated_images = []
+        for i in range(len(image_prompts_with_timing)):
+            repeated_images.append(image_paths[i % len(image_paths)])
+        image_paths = repeated_images
+    
+    # Create clips for each segment
+    for i, prompt_data in enumerate(image_prompts_with_timing):
+        if i >= len(image_paths):
+            break
+            
+        segment_duration = prompt_data["end"] - prompt_data["start"]
+        
+        # Create image clip for this segment
+        clip = ImageClip(image_paths[i])
+        clip = clip.set_duration(segment_duration)
+        clip = clip.resize(height=1280)  # Resize to match vertical format
+        
+        # Center the image
+        if clip.w > 720:
+            clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
+        else:
+            # Center the image on a black background
+            clip = clip.set_position(('center', 'center'))
+            clip = CompositeVideoClip([ColorClip(size=(720, 1280), color=(0, 0, 0)), clip])
+        
+        clips.append(clip)
+    
+    # Concatenate all clips
+    final_clip = concatenate_videoclips(clips)
+    
+    # If the total duration is less than audio, extend the last frame
+    if final_clip.duration < audio_duration:
+        last_clip = ImageClip(image_paths[-1])
+        last_clip = last_clip.set_duration(audio_duration - final_clip.duration)
+        last_clip = last_clip.resize(height=1280)
+        
+        if last_clip.w > 720:
+            last_clip = last_clip.crop(x_center=last_clip.w/2, y_center=last_clip.h/2, width=720, height=1280)
+        else:
+            last_clip = last_clip.set_position(('center', 'center'))
+            last_clip = CompositeVideoClip([ColorClip(size=(720, 1280), color=(0, 0, 0)), last_clip])
+        
+        final_clip = concatenate_videoclips([final_clip, last_clip])
+    
+    # Save the video
     output_path = f"../temp/{uuid4()}.mp4"
-    final_clip.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac")
-    print(colored(f"[+] Video created from {len(clips)} images -> {output_path}", "green"))
+    final_clip.write_videofile(output_path, fps=24, threads=2)
+    
     return output_path
-
 
 def cleanup_images(image_paths: List[str]):
     """Clean up temporary image files."""

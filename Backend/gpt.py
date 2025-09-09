@@ -54,13 +54,19 @@ def generate_script(video_subject: str, paragraph_number: str, ai_model: str, vo
         Generate a continuous story-like script for a video about: {video_subject}.
         The script should be a single flowing paragraph.
         Use simple, clear language.
+        Do not start with 'Of course', 'Here is', or any introduction
         Do not include titles, markdown, or line breaks.
         Do not mention the AI, the prompt, or the number of paragraphs.
         Just write the story directly.
-        character limit is :300 characters
+        character limit is :500 characters
         Subject: {video_subject}
         Language: {voice}
         paragraph:{paragraph_number}
+
+
+        **IMPORTANT**
+        -Do NOT add any extra commentary, introductions, or explanations.
+        -DO NOT include  Here is a script written in the first person, focusing on ..blah..bhah
     """
     
   
@@ -158,37 +164,169 @@ def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str
     # Return search terms
     return search_terms
 
-def get_image_search_terms(video_subject: str, amount: int, script: str, ai_model: str) -> List[str]:
+def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str, ai_model: str) -> List[dict]:
     """
-    Generate visually descriptive prompts for AI image generation.
+    Generate highly detailed, visually descriptive prompts for AI image generation
+    with precise timing information from subtitle file.
+
+    Returns:
+        List[dict]: A list of dictionaries with image prompts and timing information
     """
+    # Parse the subtitle file to get segments with timestamps
+    def parse_srt_subtitles(subtitle_path):
+        segments = []
+        
+        if not subtitle_path or not os.path.exists(subtitle_path):
+            return segments
+        
+        with open(subtitle_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Split into segments by empty lines
+        segments_raw = content.strip().split('\n\n')
+        
+        for segment in segments_raw:
+            lines = segment.split('\n')
+            if len(lines) >= 3:
+                # Parse timestamp line
+                timestamp_line = lines[1]
+                if '-->' in timestamp_line:
+                    start_end = timestamp_line.split('-->')
+                    if len(start_end) == 2:
+                        start_time = start_end[0].strip()
+                        end_time = start_end[1].strip()
+                        
+                        # Convert timestamp to seconds
+                        def timestamp_to_seconds(timestamp):
+                            parts = timestamp.split(':')
+                            if len(parts) == 3:
+                                hours = int(parts[0])
+                                minutes = int(parts[1])
+                                seconds_parts = parts[2].split(',')
+                                seconds = int(seconds_parts[0])
+                                milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+                                return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+                            return 0
+                        
+                        start_seconds = timestamp_to_seconds(start_time)
+                        end_seconds = timestamp_to_seconds(end_time)
+                        
+                        # Combine text lines
+                        text = ' '.join(lines[2:])
+                        
+                        segments.append({
+                            'text': text,
+                            'start': start_seconds,
+                            'end': end_seconds
+                        })
+        
+        return segments
+
+    # Parse the subtitle file
+    subtitle_segments = parse_srt_subtitles(subtitles_path)
+    
+    if not subtitle_segments:
+        # Fallback if no subtitles are available
+        return [{"Img prompt": f"{video_subject} detailed cinematic scene {i+1}", 
+                 "start": i * 3.0, "end": (i + 1) * 3.0} for i in range(amount)]
+    
+    # Prepare the prompt for GPT - more explicit about the format
     prompt = f"""
-    You are an expert visual storyteller. Generate {amount} highly detailed and cinematic prompts
-    for AI image generation, based on the video subject: "{video_subject}".
+    Based on the following subtitle segments with timestamps for a video about {video_subject},
+    generate appropriate image search terms for each segment. Return the results as a JSON array.
     
-    Each prompt must:
-    - Be visually rich and cinematic.
-    - Include characters, environment, mood, lighting, and perspective.
-    - Be unique and cover different parts of the story/script.
+    IMPORTANT: You MUST return a JSON array of objects with EXACTLY this format:
+    [
+        {{
+            "Img prompt": "detailed description of the image",
+            "start": 0.0,
+            "end": 2.5
+        }},
+        {{
+            "Img prompt": "detailed description of the next image",
+            "start": 2.5,
+            "end": 5.0
+        }},
+        ...
+    ]
+
+    Each image prompt must:
+    - Include every visible character with explicit details: gender, age, hair color, hairstyle, 
+      face shape, clothing with proper shirt color and pant color and what type of cloth it is, 
+      posture, and facial expressions.
+    - Describe the environment in detail: location, objects, background elements, weather, time of day, and props.
+    - Specify lighting, shadows, reflections, and overall cinematic mood.
+    - Indicate camera perspective, framing, and angle (e.g., close-up, wide shot, low-angle).
+    - Represent any action or emotion happening in the scene.
+    - Be unique for each prompt and reflect the specific subtitle segment.
     
-    Return strictly as a JSON array of strings. Do not include explanations, code fences, or extra formatting. Output only the JSON.
-    Video script context (first 500 chars): "{script[:500]}..."
+    Return ONLY the JSON array. Do not include any explanations, code fences, or extra text before or after the JSON.
+    
+    Subtitle segments with timestamps:
+    {json.dumps(subtitle_segments, indent=2)}
     """
     
     response = generate_response(prompt, ai_model)
     print(colored(f"[*] Raw AI response for image prompts:\n{response}", "cyan"))  # Debug
 
     try:
+        # Try to parse the response as JSON
         search_terms = json.loads(response)
+        
+        # If we got a list of strings instead of objects, convert them
+        if search_terms and isinstance(search_terms[0], str):
+            print(colored("[!] AI returned strings instead of objects, converting...", "yellow"))
+            converted_terms = []
+            for i, prompt_text in enumerate(search_terms):
+                if i < len(subtitle_segments):
+                    segment = subtitle_segments[i]
+                    converted_terms.append({
+                        "Img prompt": prompt_text,
+                        "start": segment["start"],
+                        "end": segment["end"]
+                    })
+                else:
+                    # Fallback timing if we have more prompts than segments
+                    converted_terms.append({
+                        "Img prompt": prompt_text,
+                        "start": i * 3.0,
+                        "end": (i + 1) * 3.0
+                    })
+            search_terms = converted_terms
+        
+        # Ensure we have the right amount of prompts
         if len(search_terms) < amount:
-            # Only fill missing prompts if needed
-            search_terms.extend([f"{video_subject} cinematic scene {i+1}" 
-                                 for i in range(amount - len(search_terms))])
+            # Fill missing prompts if needed
+            for i in range(amount - len(search_terms)):
+                if subtitle_segments and i < len(subtitle_segments):
+                    segment = subtitle_segments[i]
+                    search_terms.append({
+                        "Img prompt": f"{video_subject}: {segment['text']}",
+                        "start": segment["start"],
+                        "end": segment["end"]
+                    })
+                else:
+                    search_terms.append({
+                        "Img prompt": f"{video_subject} detailed cinematic scene {i+1}",
+                        "start": i * 3.0,
+                        "end": (i + 1) * 3.0
+                    })
+        
         return search_terms[:amount]
     except Exception as e:
         print(colored(f"[-] Could not parse image prompts JSON: {e}", "red"))
-        # Fallback prompts
-        return [f"{video_subject} cinematic scene {i+1}" for i in range(amount)]
+        # Fallback: create prompts based on subtitle segments
+        if subtitle_segments:
+            return [{
+                "Img prompt": f"{video_subject}: {segment['text']}",
+                "start": segment["start"],
+                "end": segment["end"]
+            } for segment in subtitle_segments[:amount]]
+        else:
+            # Final fallback
+            return [{"Img prompt": f"{video_subject} detailed cinematic scene {i+1}", 
+                     "start": i * 3.0, "end": (i + 1) * 3.0} for i in range(amount)]
+        
 
 def generate_metadata(video_subject: str, script: str, ai_model: str) -> Tuple[str, str, List[str]]:  
     """  
@@ -226,3 +364,18 @@ def generate_metadata(video_subject: str, script: str, ai_model: str) -> Tuple[s
 
     return title, description, keywords  
 
+if __name__ == "__main__":
+    subtitle_dir = r"D:\Projects\money printer\MoneyPrinter\subtitles"
+
+    if not os.path.exists(subtitle_dir):
+        print(f"Subtitle folder not found: {subtitle_dir}")
+    else:
+        subtitle_files = [f for f in os.listdir(subtitle_dir) if f.endswith(".srt")]
+        if not subtitle_files:
+            print("No .srt files found in the folder.")
+        else:
+            for file_name in subtitle_files:
+                file_path = os.path.join(subtitle_dir, file_name)
+                print(f"\nProcessing subtitle file: {file_name}")
+                search_terms = get_image_search_terms("Sample Video Subject", 5, file_path, "deepseek-chat")
+                print(json.dumps(search_terms, indent=2))

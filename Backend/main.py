@@ -33,7 +33,7 @@ CORS(app)
 # Constants
 HOST = "0.0.0.0"
 PORT = 8080
-AMOUNT_OF_STOCK_VIDEOS = 3
+AMOUNT_OF_STOCK_VIDEOS = 10
 GENERATING = False
 
 # Directory for storing all generated videos
@@ -100,11 +100,34 @@ def generate():
         # ============================
         script = generate_script(data["videoSubject"], paragraph_number, ai_model, voice, data["customPrompt"])
 
+      
+        # ============================
+        # Generate TTS Audio
+        # ============================
+
+        # Save the full script as one TTS clip
+        tts_path = f"../temp/{uuid4()}.mp3"
+        tts_hf(script, output_file=tts_path)
+        final_audio = AudioFileClip(tts_path)
+
+        # ===================================
+        # Generate subtitles With Time Stamp
+        # ==================================
+        try:
+            subtitles_path = generate_subtitles(
+                audio_path=tts_path,
+            )
+        except Exception as e:
+            print(colored(f"[-] Error generating subtitles: {e}", "red"))
+            subtitles_path = None
+
+
         # ============================
         # Fetch media based on contentType
         # ============================
+ 
+        
         if contentType == "stock":
-            # Stock videos flow
             search_terms = get_search_terms(data["videoSubject"], AMOUNT_OF_STOCK_VIDEOS, script, ai_model)
             video_urls = []
             for term in search_terms:
@@ -118,45 +141,24 @@ def generate():
             media_paths = [save_video(url) for url in video_urls]
         else:
             # Generative content flow
-            image_prompts = get_image_search_terms(data["videoSubject"], AMOUNT_OF_STOCK_VIDEOS, script, ai_model)
+            image_prompts = get_image_search_terms(data["videoSubject"], AMOUNT_OF_STOCK_VIDEOS, subtitles_path, ai_model)
             media_paths = []
-            for prompt in image_prompts:
+            for term_data  in image_prompts:
+                prompt = term_data["Img prompt"]
                 try:
-                    generated = generate_hf_images(prompt, amount=2)
-                    media_paths.extend(generated)
+                    generated = generate_hf_images(prompt)
+                    if generated:  # make sure it’s not None
+                        media_paths.append(generated)
                     if len(media_paths) >= AMOUNT_OF_STOCK_VIDEOS:
                         break
                 except Exception as e:
                     print(f"Could not generate image: {e}")
+
             if not media_paths:
                 return jsonify({"status": "error", "message": "No images generated.", "data": []})
             print(colored(f"[+] {len(media_paths)} images generated!", "green"))
 
         print(colored("[+] Script generated!\n", "green"))
-
-        # ============================
-        # Generate TTS
-        # ============================
-
-        # Save the full script as one TTS clip
-        tts_path = f"../temp/{uuid4()}.mp3"
-        tts_hf(script, output_file=tts_path)
-        final_audio = AudioFileClip(tts_path)
-
-        # ============================
-        # Generate subtitles
-        # ============================
-        try:
-            subtitles_path = generate_subtitles(
-                audio_path=tts_path,
-                sentences=[script],  # pass as single-element list
-                audio_clips=[final_audio],
-                voice=voice_prefix
-            )
-        except Exception as e:
-            print(colored(f"[-] Error generating subtitles: {e}", "red"))
-            subtitles_path = None
-
 
         # ============================
         # Create video
@@ -167,7 +169,7 @@ def generate():
             combined_video_path = combine_videos(media_paths, temp_audio.duration, 3, n_threads or 2)
         else:
             # Generative: create video from images
-            combined_video_path = create_video_from_images(media_paths, final_audio.duration)
+            combined_video_path = create_video_from_images(media_paths, image_prompts, final_audio.duration)
 
         # Save final video inside GENERATED_VIDEOS_DIR
         final_video_path = generate_video(
