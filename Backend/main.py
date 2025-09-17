@@ -29,7 +29,7 @@ CORS(app)
 HOST = "0.0.0.0"
 PORT = 8080
 
-AMOUNT_OF_STOCK_VIDEOS = 8
+AMOUNT_OF_STOCK_VIDEOS = 12
 GENERATING = False
 
 GENERATED_VIDEOS_DIR = os.path.abspath("../Generated_Video")
@@ -137,7 +137,8 @@ def generate():
             # ============================
             # Save the full script as one TTS clip
             tts_path = f"../temp/{uuid4()}.mp3"
-            tts_hf(script, output_file=tts_path)
+            voice_path = f"../voice/{voice}" if voice else "../Songs/Michel.mp3"
+            tts_hf(script, output_file=tts_path, audio_prompt=voice_path)
             final_audio = AudioFileClip(tts_path)
 
             # ===================================
@@ -219,6 +220,7 @@ def generate():
             
             bg_music_path = f"../Songs/{songsName}" if songsName else "../Songs/shadow.mp3"
             bg_music_volume = 0.3
+            
 
             # Generate the final video
             generate_video(

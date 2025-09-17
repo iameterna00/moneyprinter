@@ -135,7 +135,7 @@ def create_video_from_images(image_paths, image_prompts_with_timing, audio_durat
             # Create image clip for this segment
             clip = ImageClip(image_path)
             clip = clip.set_duration(segment_duration)
-            clip = clip.set_start(prompt_data["start"])  # CRITICAL: Set exact start time
+            clip = clip.set_start(prompt_data["start"])
             clip = clip.resize(height=1280)
             
             # Center the image

@@ -43,7 +43,7 @@ def generate_response(prompt: str, ai_model: str = "deepseek-chat") -> str:
     return data["choices"][0]["message"]["content"]
 
 
-def generate_script(video_subject: str, paragraph_number: str, ai_model: str, voice: str, customPrompt: str = None) -> str:
+def generate_script(video_subject: str, paragraph_number: str, ai_model: str,  customPrompt: str = None) -> str:
     """
     Generate a single-paragraph script for a video.
     """
@@ -69,7 +69,6 @@ def generate_script(video_subject: str, paragraph_number: str, ai_model: str, vo
         - Do not mention the AI, the prompt, or the number of paragraphs.
         - Write in a continuous, flowing paragraph.
         - Character limit: 500 characters.
-        - Language: {voice}
 
         **Subject to write about:** {video_subject}
         """
@@ -249,6 +248,15 @@ def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str,
     Video subject: {video_subject}
 
     Return EXACTLY {amount} JSON objects like:
+
+   IMPORTANT RULES:
+- Characters must remain visually consistent across all prompts.
+- Mention character visuals in eatch prompt.
+- Do NOT change species, gender, clothing, or hairstyles once introduced.
+- If a monkey is in the story, always keep it as the SAME monkey (not a donkey or other animal).
+- If a human has brown hair, it must stay brown in all frames.
+- Keep the environment, mood, and clothing consistent unless the script explicitly says they change.
+
     [
         {{
             "Img prompt": "detailed cinematic description",
