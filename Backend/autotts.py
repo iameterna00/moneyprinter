@@ -196,8 +196,8 @@ if __name__ == "__main__":
     try:
         saved = tts_hf(
             sample_text,
-            output_file=str(out_path),   # correct param name and path
-            audio_prompt=None,          # or set a reference URL/path
+            output_file=str(out_path),
+            audio_prompt="../voice/Michel.mp3",  # corrected string and single argument
             exaggeration=0.5,
             temperature=0.8,
             seed_num=0,

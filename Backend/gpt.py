@@ -143,7 +143,8 @@ def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str
         if not isinstance(search_terms, list) or not all(isinstance(term, str) for term in search_terms):
             raise ValueError("Response is not a list of strings.")
 
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, Value
+            ):
         # Get everything between the first and last square brackets
         response = response[response.find("[") + 1:response.rfind("]")]
 
@@ -166,167 +167,119 @@ def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str
     # Return search terms
     return search_terms
 
+
 def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str, ai_model: str) -> List[dict]:
     """
     Generate highly detailed, visually descriptive prompts for AI image generation
-    with precise timing information based on the video script.
-
-    Returns:
-        List[dict]: A list of dictionaries with image prompts and timing information
+    with precise timing information based on the subtitle file.
     """
-    # First, get the total duration from the subtitle file
-    def get_total_duration(subtitle_path):
-        total_duration = 0
-        if not subtitle_path or not os.path.exists(subtitle_path):
-            return 24.0  # Default duration if no subtitles
-        
-        try:
-            with open(subtitle_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            segments = content.strip().split('\n\n')
-            if segments:
-                # Get the last segment's end time
-                last_segment = segments[-1].split('\n')
-                if len(last_segment) >= 2:
-                    timestamp_line = last_segment[1]
-                    if '-->' in timestamp_line:
-                        end_time = timestamp_line.split('-->')[1].strip()
-                        # Convert to seconds
-                        parts = end_time.split(':')
-                        if len(parts) == 3:
-                            hours = int(parts[0])
-                            minutes = int(parts[1])
-                            seconds_parts = parts[2].split(',')
-                            seconds = int(seconds_parts[0])
-                            milliseconds = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
-                            total_duration = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
-        except:
-            total_duration = 24.0  # Fallback duration
-        
-        return max(total_duration, 24.0)  # Ensure minimum duration
     
-    # Get the total video duration
-    total_duration = get_total_duration(subtitles_path)
-    
-    # Parse the subtitle file to get the full script
-    def get_full_script(subtitle_path):
-        full_script = ""
-        if not subtitle_path or not os.path.exists(subtitle_path):
-            return f"A video about {video_subject}"
+    # --- Helper: Parse SRT into segments with start/end in seconds ---
+    def parse_srt(subtitles_path: str) -> List[dict]:
+        segments = []
+        if not subtitles_path or not os.path.exists(subtitles_path):
+            return segments
+        with open(subtitles_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+        blocks = content.split('\n\n')
+        for block in blocks:
+            lines = block.split('\n')
+            if len(lines) >= 3:
+                ts_match = re.match(
+                    r"(\d+):(\d+):(\d+),(\d+)\s*-->\s*(\d+):(\d+):(\d+),(\d+)", 
+                    lines[1]
+                )
+                if ts_match:
+                    h1, m1, s1, ms1, h2, m2, s2, ms2 = map(int, ts_match.groups())
+                    start_sec = h1*3600 + m1*60 + s1 + ms1/1000
+                    end_sec = h2*3600 + m2*60 + s2 + ms2/1000
+                    text = " ".join(lines[2:]).strip()
+                    segments.append({
+                        "text": text,
+                        "start": start_sec,
+                        "end": end_sec
+                    })
+        return segments
+
+    # --- Get total duration from subtitles ---
+    def get_total_duration(segments: List[dict]) -> float:
+        if segments:
+            return segments[-1]["end"]
+        return 24.0  # fallback
+
+    # --- Generate fallback image prompts ---
+    def fallback_prompts(segments: List[dict], amount: int) -> List[dict]:
+        if not segments:
+            segment_duration = 24.0 / amount
+            return [{
+                "Img prompt": f"{video_subject} - scene {i+1}, detailed cinematic shot",
+                "start": i*segment_duration,
+                "end": (i+1)*segment_duration
+            } for i in range(amount)]
         
-        try:
-            with open(subtitle_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            segments = content.strip().split('\n\n')
-            for segment in segments:
-                lines = segment.split('\n')
-                if len(lines) >= 3:
-                    # Add the text content
-                    full_script += " ".join(lines[2:]) + " "
-        except:
-            full_script = f"A video about {video_subject}"
-        
-        return full_script.strip()
+        # Split segments evenly into `amount` groups
+        step = max(1, len(segments) // amount)
+        prompts = []
+        for i in range(0, len(segments), step):
+            segs = segments[i:i+step]
+            prompt_text = " ".join([s['text'] for s in segs])
+            prompts.append({
+                "Img prompt": f"Cinematic scene: {prompt_text}",
+                "start": segs[0]['start'],
+                "end": segs[-1]['end']
+            })
+        return prompts[:amount]  # Ensure exact amount
+
+    # --- Main logic ---
+    segments = parse_srt(subtitles_path)
+    total_duration = get_total_duration(segments)
     
-    # Get the full script
-    full_script = get_full_script(subtitles_path)
-    
-    # Calculate timing for each image
+    # Define segment_duration for outer fallback
     segment_duration = total_duration / amount
-    
-    # Prepare the prompt for GPT
+
+    full_script = " ".join([s['text'] for s in segments]) if segments else f"A video about {video_subject}"
+
+    # Prepare GPT prompt
     prompt = f"""
     Based on the following video script about {video_subject}, generate {amount} highly detailed image prompts 
-    for AI image generation. The video has a total duration of {total_duration:.2f} seconds, and each image 
-    should be displayed for approximately {segment_duration:.2f} seconds.
+    for AI image generation. The video has a total duration of {total_duration:.2f} seconds.
+    Analyze the subtitle content to determine start and end times for each image that align with the content.
 
-    Return the results as a JSON array with EXACTLY {amount} objects in this format:
+    Video script: "{full_script}"
+    Video subject: {video_subject}
+
+    Return EXACTLY {amount} JSON objects like:
     [
         {{
-            "Img prompt": "detailed cinematic description of the first image",
+            "Img prompt": "detailed cinematic description",
             "start": 0.0,
-            "end": {segment_duration:.2f}
-        }},
-        {{
-            "Img prompt": "detailed cinematic description of the second image",
-            "start": {segment_duration:.2f},
-            "end": {segment_duration * 2:.2f}
+            "end": 12.8
         }},
         ...
     ]
-
-    Each image prompt must:
-    - Be highly detailed and visually descriptive
-    - Cover different aspects of the video script in chronological order
-    - Include specific details about characters, environments, lighting, and camera angles
-    - Be suitable for AI image generation (clear, specific, descriptive)
-    - Represent key moments or concepts from the script
-
-    Video script: "{full_script}"
-
-    Video subject: {video_subject}
-
-    Return ONLY the JSON array. Do not include any explanations, code fences, or extra text.
     """
     
-    response = generate_response(prompt, ai_model)
-    print(colored(f"[*] Raw AI response for image prompts:\n{response}", "cyan"))
-
     try:
-        # Try to parse the response as JSON
+        response = generate_response(prompt, ai_model)
+        print(colored(f"[*] Raw AI response for image prompts:\n{response}", "cyan"))
         search_terms = json.loads(response)
-        
-        # Validate the structure
-        if not isinstance(search_terms, list):
-            raise ValueError("Response is not a list")
-        
-        # Ensure we have the right number of prompts
-        if len(search_terms) != amount:
-            print(colored(f"[!] Got {len(search_terms)} prompts but expected {amount}, adjusting...", "yellow"))
-            # Create or trim prompts as needed
-            if len(search_terms) < amount:
-                # Add missing prompts
-                for i in range(len(search_terms), amount):
-                    start_time = i * segment_duration
-                    end_time = (i + 1) * segment_duration
-                    search_terms.append({
-                        "Img prompt": f"{video_subject} - scene {i+1}, detailed cinematic shot",
-                        "start": start_time,
-                        "end": end_time
-                    })
-            else:
-                # Trim excess prompts
-                search_terms = search_terms[:amount]
-        
-        # Ensure each prompt has the correct structure
-        for i, prompt_data in enumerate(search_terms):
-            if not isinstance(prompt_data, dict) or "Img prompt" not in prompt_data:
-                # Fix malformed prompts
-                start_time = i * segment_duration
-                end_time = (i + 1) * segment_duration
-                search_terms[i] = {
-                    "Img prompt": f"{video_subject} - key moment {i+1}, cinematic view",
-                    "start": start_time,
-                    "end": end_time
-                }
-            else:
-                # Ensure proper timing
-                search_terms[i]["start"] = i * segment_duration
-                search_terms[i]["end"] = (i + 1) * segment_duration
-        
+
+        # Validate number of prompts
+        if not isinstance(search_terms, list) or len(search_terms) != amount:
+            print(colored("[!] AI response invalid or incomplete, using fallback.", "yellow"))
+            search_terms = fallback_prompts(segments, amount)
+
+        # Ensure timeline consistency
+        if search_terms:
+            search_terms[0]["start"] = 0.0
+            search_terms[-1]["end"] = total_duration
+            for i in range(len(search_terms) - 1):
+                search_terms[i]["end"] = search_terms[i+1]["start"]
         return search_terms
-        
+
     except Exception as e:
-        print(colored(f"[-] Could not parse image prompts JSON: {e}", "red"))
-        # Fallback: create evenly spaced prompts
-        return [{
-            "Img prompt": f"{video_subject} - scene {i+1}, detailed cinematic shot with appropriate elements from the story",
-            "start": i * segment_duration,
-            "end": (i + 1) * segment_duration
-        } for i in range(amount)]
-        
+        print(colored(f"[-] Could not generate prompts from AI: {e}", "red"))
+        return fallback_prompts(segments, amount)
 
 def generate_metadata(video_subject: str, script: str, ai_model: str) -> Tuple[str, str, List[str]]:  
     """  

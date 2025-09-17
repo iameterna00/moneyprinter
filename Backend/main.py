@@ -10,9 +10,7 @@ from termcolor import colored
 from moviepy.config import change_settings
 from moviepy.editor import AudioFileClip, concatenate_audioclips
 from dotenv import load_dotenv
-
-# Custom imports
-from gemini import  generate_hf_images
+from gemini import generate_hf_images
 from utils import clean_dir, check_env_vars, fetch_songs
 from gpt import generate_response, generate_script, generate_metadata, get_image_search_terms, get_search_terms
 from tiktokvoice import tts
@@ -20,25 +18,29 @@ from video import combine_videos, create_video_from_images, generate_subtitles, 
 from youtube import upload_video
 from apiclient.errors import HttpError
 
-
 load_dotenv("../.env")
 check_env_vars()
 SESSION_ID = os.getenv("TIKTOK_SESSION_ID")
 change_settings({"IMAGEMAGICK_BINARY": os.getenv("IMAGEMAGICK_BINARY")})
 
-
 app = Flask(__name__)
 CORS(app)
 
-
 HOST = "0.0.0.0"
 PORT = 8080
+
 AMOUNT_OF_STOCK_VIDEOS = 8
 GENERATING = False
 
-
 GENERATED_VIDEOS_DIR = os.path.abspath("../Generated_Video")
 os.makedirs(GENERATED_VIDEOS_DIR, exist_ok=True)
+
+SONGS_DIR = os.path.abspath("../Songs")
+os.makedirs(SONGS_DIR, exist_ok=True)
+
+VOICE_DIR = os.path.abspath("../voice")
+os.makedirs(VOICE_DIR, exist_ok=True)
+
 
 # ============================
 # Helper: Safe JSON parsing
@@ -55,50 +57,56 @@ def safe_parse_json(response: str):
                 return []
         return []
 
-# ============================
+# ===========================================
 # Video generation endpoint
-# ============================
+# ============================================
 @app.route("/api/generate", methods=["POST"])
 def generate():
     global GENERATING
     try:
         GENERATING = True
-
-        # Clean temp directories
-        clean_dir("../temp/")
-        clean_dir("../subtitles/")
-
-        # Parse request data
         data = request.get_json()
+        
+#=================================================
+# Get custom prompts array 
+#==================================================
+
+        custom_prompts = data.get('customPrompts', [])
+        custom_prompts = [p for p in custom_prompts if p and p.strip()]
+        use_custom_prompts = len(custom_prompts) > 0
+        
+        if use_custom_prompts:
+            amountofshorts = len(custom_prompts)
+        else:
+            amountofshorts = int(data.get('threads', 1))
+        
         paragraph_number = int(data.get('paragraphNumber', 1))
         ai_model = data.get('aiModel')
-        amountofshorts = int(data.get('threads', 1))  # Number of videos to generate
         subtitles_position = data.get('subtitlesPosition')
         text_color = data.get('color')
         use_music = data.get('useMusic', False)
         automate_youtube_upload = data.get('automateYoutubeUpload', False)
         contentType = data.get('contentType', "stock")
-        songs_zip_url = data.get('zipUrl')
-        voice = data.get("voice", "en_us_001")
-        voice_prefix = voice[:2]
-
-        # Download music if needed
-        if use_music:
-            fetch_songs(songs_zip_url or
-                        "https://filebin.net/2avx134kdibc4c3q/drive-download-20240209T180019Z-001.zip")
-
-        print(colored("[Videos to be generated]", "blue"))
-        print(colored(f"   Subject: {data['videoSubject']}", "blue"))
+        songsName = data.get('songsName')
+        voice = data.get("voiceName")
+        video_subject = data.get('videoSubject', '')
+        print(colored(f"[SELECTED SONG: {songsName}]", "blue"))
+        print(colored(f"[Videos to be generated: {amountofshorts}]", "blue"))
+        print(colored(f"   Subject: {video_subject}", "blue"))
         print(colored(f"   AI Model: {ai_model}", "blue"))
-        print(colored(f"   Custom Prompt: {data['customPrompt']}", "blue"))
-        print(colored(f"   Number of videos: {amountofshorts}", "blue"))
+        print(colored(f"   Using custom prompts: {use_custom_prompts}", "blue"))
+        if use_custom_prompts:
+            print(colored(f"   Custom prompts count: {len(custom_prompts)}", "blue"))
+
 
         if not GENERATING:
             return jsonify({"status": "error", "message": "Video generation was cancelled.", "data": []})
 
         generated_video_paths = []
         
-        # Loop to generate multiple videos
+        # ============================
+        # LOOP GENERATION
+        # ============================
         for video_index in range(amountofshorts):
             if not GENERATING:
                 break
@@ -112,16 +120,17 @@ def generate():
             # ============================
             # Generate script
             # ============================
-            if data.get("customPrompt"):  
-                script = data["customPrompt"]  # use custom prompt directly
+            if use_custom_prompts:
+                script = custom_prompts[video_index]  # use specific custom prompt
+                print(colored(f"   Using custom prompt: {script[:100]}...", "blue"))
             else:
                 script = generate_script(
-                    data["videoSubject"], 
+                    video_subject, 
                     paragraph_number, 
                     ai_model, 
-                    voice, 
-                    data.get("customPrompt")  # still pass if needed
+                    None  # no custom prompt in traditional flow
                 )
+                print(colored(f"   Generated script: {script[:100]}...", "blue"))
 
             # ============================
             # Generate TTS Audio
@@ -149,7 +158,7 @@ def generate():
             image_prompts = []
             
             if contentType == "stock":
-                search_terms = get_search_terms(data["videoSubject"], AMOUNT_OF_STOCK_VIDEOS, script, ai_model)
+                search_terms = get_search_terms(video_subject, AMOUNT_OF_STOCK_VIDEOS, script, ai_model)
                 video_urls = []
                 for term in search_terms:
                     found = search_for_stock_videos(term, os.getenv("PEXELS_API_KEY"), it=15, min_dur=10)
@@ -163,11 +172,11 @@ def generate():
                 media_paths = [save_video(url) for url in video_urls]
             else:
                 # Generative content flow
-                image_prompts = get_image_search_terms(data["videoSubject"], AMOUNT_OF_STOCK_VIDEOS, subtitles_path, ai_model)
+                image_prompts = get_image_search_terms(video_subject, AMOUNT_OF_STOCK_VIDEOS, subtitles_path, ai_model)
                 for term_data in image_prompts:
                     prompt = term_data["Img prompt"] if isinstance(term_data, dict) else term_data
                     try:
-                        generated = generate_hf_images(prompt)
+                        generated = generate_hf_images(prompt, contentType)
                         if generated:  # make sure it's not None
                             media_paths.append(generated)
                         if len(media_paths) >= AMOUNT_OF_STOCK_VIDEOS:
@@ -204,13 +213,18 @@ def generate():
                 
                 combined_video_path = create_video_from_images(media_paths, image_prompts, final_audio.duration)
 
-            # Save final video inside GENERATED_VIDEOS_DIR
-            bg_music_path = "../Songs/dark.mp3" 
-            bg_music_volume = 0.3 
+            # Save final video with unique name
+            final_filename = f"output_{uuid4().hex[:8]}.mp4"
+            final_video_path = os.path.join(GENERATED_VIDEOS_DIR, final_filename)
+            
+            bg_music_path = f"../Songs/{songsName}" if songsName else "../Songs/shadow.mp3"
+            bg_music_volume = 0.3
 
-            final_video_path = generate_video(
+            # Generate the final video
+            generate_video(
                 combined_video_path, tts_path, subtitles_path,
-                n_threads, subtitles_position, text_color or "#FFFF00", bg_music_path, bg_music_volume 
+                n_threads, subtitles_position, text_color or "#FFFF00", 
+                bg_music_path, bg_music_volume, final_video_path
             )
             
             # Close audio clips to free resources
@@ -222,7 +236,7 @@ def generate():
             # ============================
             # Generate metadata
             # ============================
-            title, description, keywords = generate_metadata(data["videoSubject"], script, ai_model)
+            title, description, keywords = generate_metadata(video_subject, script, ai_model)
 
             # ============================
             # Optional YouTube upload
@@ -248,16 +262,18 @@ def generate():
         GENERATING = False
         
         if generated_video_paths:
+            # Return only the filenames (not full paths) for security
+            video_filenames = [os.path.basename(path) for path in generated_video_paths]
             return jsonify({
                 "status": "success", 
                 "message": f"{len(generated_video_paths)} videos generated!", 
-                "data": generated_video_paths
+                "data": video_filenames
             })
         else:
             return jsonify({"status": "error", "message": "No videos were generated.", "data": []})
 
     except Exception as err:
-        print(colored(f"[-] Error eerror: {err}", "red"))
+        print(colored(f"[-] Error: {err}", "red"))
         GENERATING = False
         return jsonify({"status": "error", "message": str(err), "data": []})
 
@@ -274,6 +290,7 @@ def cancel():
 # ============================
 # List and serve generated videos
 # ============================
+
 @app.route("/videos")
 def list_videos():
     if not os.path.exists(GENERATED_VIDEOS_DIR):
@@ -282,12 +299,42 @@ def list_videos():
     files = [f for f in os.listdir(GENERATED_VIDEOS_DIR) if f.endswith(".mp4")]
     return jsonify({"status": "success", "videos": files})
 
+
 @app.route("/video/<filename>")
 def serve_video(filename):
     if os.path.exists(os.path.join(GENERATED_VIDEOS_DIR, filename)):
         return send_from_directory(GENERATED_VIDEOS_DIR, filename)
     else:
         return jsonify({"status": "error", "message": "Video not found"}), 404
+    
+
+@app.route("/songs")
+def list_songs(): 
+    if not os.path.exists(SONGS_DIR):
+        return jsonify({"status": "success", "songs": []})
+    
+    files = [f for f in os.listdir(SONGS_DIR) if f.endswith(".mp3")]
+    return jsonify({"status": "success", "songs": files})
+
+
+@app.route("/songs/<path:filename>")
+def get_song(filename):  
+    return send_from_directory(SONGS_DIR, filename)
+
+@app.route("/voice")
+def list_voice(): 
+    if not os.path.exists(VOICE_DIR):
+        return jsonify({"status": "success", "voice": []})
+    
+    files = [f for f in os.listdir(VOICE_DIR) if f.endswith(".mp3")]
+    return jsonify({"status": "success", "voice": files})
+
+
+@app.route("/voice/<path:filename>")
+def get_voice(filename):  
+    return send_from_directory(VOICE_DIR, filename)
+
+
 
 # ============================
 # Run server

@@ -38,7 +38,7 @@ def save_video(video_url: str, directory: str = "../temp") -> str:
     return video_path
 
 
-def add_shaky_effect(clip, intensity=3, frequency=5):
+def add_shaky_effect(clip, intensity=6, frequency=12):
     """
     Adds a smooth continuous movement effect to a video clip.
     """
@@ -401,8 +401,8 @@ def generate_video(
     bg_music_path: str = None,
     bg_music_volume: float = 0.3,
     shaky_effect: bool = True,
-    shake_intensity: int = 8,
-    shake_frequency: int = 5
+    shake_intensity: int = 5,
+    shake_frequency: int = 12
 ) -> str:
     """
     This function creates the final video, with subtitles and audio.
