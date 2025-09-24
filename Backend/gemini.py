@@ -46,13 +46,24 @@ def generate_hf_images(
     try:
         if contentType == "cartoon":
             newprompt = (
-                f"{prompt} night dark, cinematic cartoon style, with heavy shadows, "
+                f"{prompt} night dark, old cartoon style, with heavy shadows, "
                 f"dramatic lighting, night-time setting, detailed linework, and an eerie, surreal atmosphere. "
                 f"Inspired by adult animated shows and noir comics. Subtle neon glow, slightly distorted "
                 f"facial expressions, thick outlines, VHS effect, muted colors, and vintage textures. "
                 f"Stylized background with twilight skies, mysterious environments, and emotional tension. "
                 f"4K, highly detailed, digital painting. Aspect ratio 9:16"
             )
+        
+        elif contentType == "silhouette":
+            newprompt = (
+                f"{prompt}. The scene is rendered in a dark, atmospheric style with a sharp silhouette of the character "
+                f"standing out against a shadowy, abstract background. An eerie, glowing aura radiates from the figure, "
+                f"casting high-contrast light and subtle highlights. Swirling tendrils of energy or smoke surround the character, "
+                f"giving a sense of power and mystery. Intricate, faintly glowing symbols or patterns are subtly integrated into the composition, "
+                f"adding layers of psychic or supernatural meaning. The overall mood is surreal, intense, and moody, "
+                f"evoking a sense of control, dominance, or hidden power. High detail, digital art, dramatic lighting, cinematic 4K, vertical composition (9:16)."
+            )
+
         else:
             newprompt = prompt
 

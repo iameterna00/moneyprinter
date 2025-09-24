@@ -29,7 +29,7 @@ CORS(app)
 HOST = "0.0.0.0"
 PORT = 8080
 
-AMOUNT_OF_STOCK_VIDEOS = 12
+AMOUNT_OF_STOCK_VIDEOS = 14
 GENERATING = False
 
 GENERATED_VIDEOS_DIR = os.path.abspath("../Generated_Video")
@@ -196,7 +196,7 @@ def generate():
             # Create video
             # ============================
             # Initialize n_threads with a default value
-            n_threads = 2
+            n_threads = 1
             
             if contentType == "stock":
                 # Stock videos: combine downloaded video clips
@@ -204,10 +204,7 @@ def generate():
                 combined_video_path = combine_videos(media_paths, temp_audio.duration, 3, n_threads)
                 temp_audio.close()
             else:
-                # Generative: create video from images
-                # Make sure we have enough image prompts for all images
                 if len(image_prompts) < len(media_paths):
-                    # If we don't have enough prompts, duplicate the last one
                     last_prompt = image_prompts[-1] if image_prompts else {"Img prompt": "Abstract technology background"}
                     while len(image_prompts) < len(media_paths):
                         image_prompts.append(last_prompt)

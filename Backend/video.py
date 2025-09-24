@@ -14,10 +14,10 @@ from datetime import timedelta
 from moviepy.video.fx.all import crop
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.editor import CompositeAudioClip
-from moviepy.audio.fx.volumex import volumex
-from moviepy.video.tools.subtitles import SubtitlesClip
+from moviepy.editor import TextClip, CompositeVideoClip
 from moviepy.config import change_settings
-import cv2
+from video_effect.popuptext import create_pop_text_clip
+from video_effect.videomoment import add_shaky_effect, add_subtle_zoom_movement, create_video_from_images
 
 # Configure ImageMagick path
 change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
@@ -36,142 +36,6 @@ def save_video(video_url: str, directory: str = "../temp") -> str:
     with open(video_path, "wb") as f:
         f.write(requests.get(video_url).content)
     return video_path
-
-
-def add_shaky_effect(clip, intensity=6, frequency=12):
-    """
-    Adds a smooth continuous movement effect to a video clip.
-    """
-    print(colored(f"[DEBUG] Applying continuous shaky effect: intensity={intensity}, frequency={frequency}", "yellow"))
-    
-    # Initialize smooth movement variables
-    current_offset_x, current_offset_y = 0, 0
-    target_offset_x, target_offset_y = 0, 0
-    last_change_time = 0
-    
-    def smooth_movement(get_frame, t):
-        nonlocal current_offset_x, current_offset_y, target_offset_x, target_offset_y, last_change_time
-        
-        # Change target position based on frequency
-        if t - last_change_time >= 1.0 / frequency:
-            target_offset_x = random.uniform(-intensity, intensity)
-            target_offset_y = random.uniform(-intensity, intensity)
-            last_change_time = t
-        
-        # Smoothly interpolate toward target position
-        current_offset_x += (target_offset_x - current_offset_x) * 0.2
-        current_offset_y += (target_offset_y - current_offset_y) * 0.2
-        
-        # Get the original frame
-        frame = get_frame(t)
-        height, width = frame.shape[:2]
-        
-        # Create transformation matrix for smooth movement
-        M = np.float32([[1, 0, current_offset_x], [0, 1, current_offset_y]])
-        
-        # Apply the smooth transformation using warpAffine
-        smooth_frame = cv2.warpAffine(frame, M, (width, height), borderMode=cv2.BORDER_REFLECT)
-        
-        return smooth_frame
-    
-    # Apply the effect to the clip
-    return clip.fl(smooth_movement)
-
-def create_video_from_images(image_paths, image_prompts_with_timing, audio_duration, transition_duration=0.5):
-    """
-    Create a video from images with precise timing
-    """
-    from moviepy.editor import ImageClip, ColorClip, CompositeVideoClip
-    
-    # Validate and clean image prompts
-    valid_prompts = []
-    for prompt_data in image_prompts_with_timing:
-        try:
-            # Check if it's a dictionary with the expected structure
-            if (isinstance(prompt_data, dict) and 
-                "start" in prompt_data and "end" in prompt_data and
-                isinstance(prompt_data["start"], (int, float)) and 
-                isinstance(prompt_data["end"], (int, float)) and
-                prompt_data["end"] > prompt_data["start"]):
-                valid_prompts.append(prompt_data)
-        except (KeyError, TypeError, AttributeError):
-            # Skip invalid entries
-            continue
-    
-    # If no valid prompts, create default timing
-    if not valid_prompts:
-        print(colored("[!] No valid timing data found, using default timing", "yellow"))
-        segment_duration = audio_duration / len(image_paths)
-        for i in range(len(image_paths)):
-            valid_prompts.append({
-                "start": i * segment_duration,
-                "end": (i + 1) * segment_duration
-            })
-    
-    # Make sure we have the same number of images as prompts
-    if len(image_paths) != len(valid_prompts):
-        print(colored(f"[!] Mismatch: {len(image_paths)} images vs {len(valid_prompts)} prompts. Adjusting...", "yellow"))
-        # Use the minimum of both to avoid index errors
-        min_length = min(len(image_paths), len(valid_prompts))
-        image_paths = image_paths[:min_length]
-        valid_prompts = valid_prompts[:min_length]
-    
-    # Create a list to hold all clips with their precise timing
-    all_clips = []
-    
-    # Process each image segment
-    for i in range(len(valid_prompts)):
-        try:
-            prompt_data = valid_prompts[i]
-            image_path = image_paths[i]
-            
-            # Check if image file exists
-            if not os.path.exists(image_path):
-                print(colored(f"[!] Image file not found: {image_path}", "red"))
-                raise FileNotFoundError(f"Image file not found: {image_path}")
-            
-            segment_duration = prompt_data["end"] - prompt_data["start"]
-            
-            # Create image clip for this segment
-            clip = ImageClip(image_path)
-            clip = clip.set_duration(segment_duration)
-            clip = clip.set_start(prompt_data["start"])
-            clip = clip.resize(height=1280)
-            
-            # Center the image
-            if clip.w > 720:
-                clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
-            else:
-                # Create a black background with the image centered
-                bg_clip = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=segment_duration)
-                clip = CompositeVideoClip([bg_clip, clip.set_position('center')])
-            
-            all_clips.append(clip)
-            
-        except Exception as e:
-            print(colored(f"[!] Error processing image {image_paths[i] if i < len(image_paths) else 'unknown'}: {e}", "red"))
-            # Add a black frame as fallback
-            segment_duration = valid_prompts[i]["end"] - valid_prompts[i]["start"]
-            fallback_clip = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=segment_duration)
-            fallback_clip = fallback_clip.set_start(valid_prompts[i]["start"])
-            all_clips.append(fallback_clip)
-    
-    # Create the final composite video with all clips at their precise timings
-    if not all_clips:
-        print(colored("[!] No clips to composite", "red"))
-        # Create a blank video as fallback
-        blank_clip = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=audio_duration)
-        final_clip = blank_clip
-    else:
-        final_clip = CompositeVideoClip(all_clips)
-    
-    final_clip = final_clip.set_duration(audio_duration)
-    
-    # Save the video
-    output_path = f"../temp/{uuid.uuid4()}.mp4"
-    final_clip.write_videofile(output_path, fps=24, threads=2, verbose=False, logger=None)
-    
-    return output_path
 
 def cleanup_images(image_paths: List[str]):
     """Clean up temporary image files."""
@@ -210,7 +74,7 @@ def generate_subtitles(audio_path: str, model_size: str = "base") -> str:
     """
     Generates subtitles from an audio file using Whisper locally.
     """
-    def equalize_subtitles(srt_path: str, max_chars: int = 20):
+    def equalize_subtitles(srt_path: str, max_chars: int = 10):
         srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
 
     subtitles_path = f"../subtitles/{uuid.uuid4()}.srt"
@@ -296,69 +160,6 @@ def combine_videos(video_paths: List[str], max_duration: int, max_clip_duration:
     return combined_video_path
 
 
-def create_pop_text_clip(txt, duration=5, font="../fonts/luck.ttf", fontsize=70, color="#FFFFFF", 
-                        stroke_color="black", stroke_width=5, pop_duration=0.3):
-    """
-    Creates a text clip with a pop animation effect.
-    """
-    # Create the base text clip
-    txt_clip = TextClip(
-        txt,
-        font=font,
-        fontsize=fontsize,
-        color=color,
-        stroke_color=stroke_color,
-        stroke_width=stroke_width,
-        size=(700, None),
-        method="caption",
-        align="center"
-    )
-    
-    # Set the duration
-    txt_clip = txt_clip.set_duration(duration)
-    
-    # Add pop animation (scale up then back to normal)
-    def pop_effect(get_frame, t):
-        frame = get_frame(t)
-        
-        # Apply pop effect in the first 30% of the clip duration
-        if t < pop_duration:
-            # Scale up during pop-in
-            scale = 1.0 + (0.2 * (t / pop_duration))
-            height, width = frame.shape[:2]
-            
-            # Create a new frame with the same dimensions
-            new_frame = np.zeros_like(frame)
-            
-            # Calculate scaled dimensions
-            new_height = int(height * scale)
-            new_width = int(width * scale)
-            
-            # Resize the frame
-            from PIL import Image
-            pil_img = Image.fromarray(frame)
-            pil_img = pil_img.resize((new_width, new_height), Image.LANCZOS)
-            scaled_frame = np.array(pil_img)
-            
-            # Center the scaled frame
-            y_offset = (height - new_height) // 2
-            x_offset = (width - new_width) // 2
-            
-            # Copy the scaled frame to the center
-            if y_offset >= 0 and x_offset >= 0 and y_offset + new_height <= height and x_offset + new_width <= width:
-                new_frame[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = scaled_frame
-            else:
-                new_frame = frame
-                
-            return new_frame
-        
-        return frame
-    
-    # Apply the pop effect
-    txt_clip = txt_clip.fl(pop_effect)
-    
-    return txt_clip
-
 
 def add_background_music(video_clip, music_path, volume=0.3, loop=True):
     """
@@ -390,7 +191,6 @@ def add_background_music(video_clip, music_path, volume=0.3, loop=True):
     # Set the composite audio to the video clip
     return video_clip.set_audio(composite_audio)
 
-
 def generate_video(
     combined_video_path: str,
     tts_path: str,
@@ -401,8 +201,12 @@ def generate_video(
     bg_music_path: str = None,
     bg_music_volume: float = 0.3,
     shaky_effect: bool = True,
-    shake_intensity: int = 5,
-    shake_frequency: int = 12
+    shake_intensity: int = 8,  
+    shake_frequency: int = 20,  
+    zoom_effect: bool = True,  
+    max_zoom: float = 1.13,  # Changed from zoom_range to max_zoom (3% zoom)
+    movement_range: float = 50,  
+    zoom_change_interval: float = 3.0 
 ) -> str:
     """
     This function creates the final video, with subtitles and audio.
@@ -451,11 +255,11 @@ def generate_video(
             text,
             duration=duration,
             font="../fonts/luck.ttf",
-            fontsize=80,
+            fontsize=50,
             color=text_color,
             stroke_color="black",
             stroke_width=1,
-            pop_duration=0.5 
+            pop_duration=0.2
         )
         
         horizontal_subtitles_position, vertical_subtitles_position = subtitles_position.split(",")
@@ -474,10 +278,36 @@ def generate_video(
         print(colored("[+] Adding background music...", "blue"))
         result = add_background_music(result, bg_music_path, bg_music_volume)
 
-    # Apply continuous shaky effect to the final composite video
-    if shaky_effect:
-        print(colored("[+] Applying continuous smooth shaky effect to final video...", "blue"))
-        result = add_shaky_effect(result, shake_intensity, shake_frequency)
+    # Apply effects with proper error handling
+    try:
+        if zoom_effect:
+            print(colored("[+] Applying zoom-in only effect...", "blue"))
+            result = add_subtle_zoom_movement(
+                result, 
+                min_zoom=1.0,
+                max_zoom=max_zoom,  
+                horizontal_range=movement_range,
+                cycles=zoom_change_interval
+            )
+    except Exception as e:
+        print(colored(f"[WARNING] Zoom effect failed: {e}, continuing without it", "yellow"))
+    
+    try:
+        if shaky_effect:
+            print(colored("[+] Applying continuous smooth shaky effect to final video...", "blue"))
+            # Use the MoviePy version (more reliable)
+            result = add_shaky_effect(result, shake_intensity, shake_frequency)
+    except Exception as e:
+        print(colored(f"[WARNING] Shaky effect failed: {e}, trying OpenCV version", "yellow"))
+        try:
+            result = add_shaky_effect(result, shake_intensity, shake_frequency)
+        except Exception as e2:
+            print(colored(f"[WARNING] Both shaky effect methods failed: {e2}, continuing without shaky effect", "yellow"))
+
+    # Ensure duration is set before writing
+    if not hasattr(result, 'duration') or result.duration is None:
+        print(colored("[WARNING] Result clip has no duration, setting to audio duration", "yellow"))
+        result = result.set_duration(audio.duration)
 
     result.write_videofile(
         final_video_path, 
@@ -490,7 +320,7 @@ def generate_video(
         logger=None
     )
 
-    print(colored(f"[+] Final video with continuous shaky effect saved as {final_video_path}", "green"))
+    print(colored(f"[+] Final video saved as {final_video_path}", "green"))
     return final_video_path
 
 
