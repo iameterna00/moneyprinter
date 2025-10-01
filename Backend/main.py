@@ -4,6 +4,7 @@ import re
 from uuid import uuid4
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from img_vid import create_video_from_images_with_ltx
 from autotts import tts_hf
 from search import search_for_stock_videos
 from termcolor import colored
@@ -29,7 +30,7 @@ CORS(app)
 HOST = "0.0.0.0"
 PORT = 8080
 
-AMOUNT_OF_STOCK_VIDEOS = 14
+AMOUNT_OF_STOCK_VIDEOS = 7
 GENERATING = False
 
 GENERATED_VIDEOS_DIR = os.path.abspath("../Generated_Video")
@@ -209,7 +210,7 @@ def generate():
                     while len(image_prompts) < len(media_paths):
                         image_prompts.append(last_prompt)
                 
-                combined_video_path = create_video_from_images(media_paths, image_prompts, final_audio.duration)
+                combined_video_path = create_video_from_images_with_ltx(media_paths, image_prompts, final_audio.duration)
 
             # Save final video with unique name
             final_filename = f"output_{uuid4().hex[:8]}.mp4"
