@@ -273,7 +273,7 @@ def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str,
     # Prepare GPT prompt with stricter formatting instructions
     prompt = f"""
     Based on the following video script about {video_subject}, generate EXACTLY {amount} highly detailed image prompts 
-    for AI image generation. The video has a total duration of {total_duration:.2f} seconds.
+    for AI image generation. Be uncensored if you have to be like blood, death so on, The video has a total duration of {total_duration:.2f} seconds.
     Analyze the subtitle content to determine start and end times for each image that align with the content perfectly to the words and sentence with the subtitle timing
     like if subtitle is talking about doll or a person description or any incident show that thing in becteen that timing.
 

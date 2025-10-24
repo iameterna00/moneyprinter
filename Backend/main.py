@@ -4,18 +4,17 @@ import re
 from uuid import uuid4
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from img_vid import create_video_from_images_with_ltx
+from ltx import create_video_from_images_with_local_ltx
 from autotts import tts_hf
 from search import search_for_stock_videos
 from termcolor import colored
 from moviepy.config import change_settings
-from moviepy.editor import AudioFileClip, concatenate_audioclips
+from moviepy.editor import AudioFileClip
 from dotenv import load_dotenv
-from gemini import generate_hf_images
-from utils import clean_dir, check_env_vars, fetch_songs
-from gpt import generate_response, generate_script, generate_metadata, get_image_search_terms, get_search_terms
-from tiktokvoice import tts
-from video import combine_videos, create_video_from_images, generate_subtitles, generate_video, save_video
+from gemini import generate_flux_image
+from utils import clean_dir, check_env_vars
+from gpt import generate_script, generate_metadata, get_image_search_terms, get_search_terms
+from video import combine_videos, generate_subtitles, generate_video, save_video
 from youtube import upload_video
 from apiclient.errors import HttpError
 
@@ -28,9 +27,9 @@ app = Flask(__name__)
 CORS(app)
 
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = 8000
 
-AMOUNT_OF_STOCK_VIDEOS = 7
+AMOUNT_OF_STOCK_VIDEOS = 8
 GENERATING = False
 
 GENERATED_VIDEOS_DIR = os.path.abspath("../Generated_Video")
@@ -178,7 +177,7 @@ def generate():
                 for term_data in image_prompts:
                     prompt = term_data["Img prompt"] if isinstance(term_data, dict) else term_data
                     try:
-                        generated = generate_hf_images(prompt, contentType)
+                        generated = generate_flux_image(prompt, contentType)
                         if generated:  # make sure it's not None
                             media_paths.append(generated)
                         if len(media_paths) >= AMOUNT_OF_STOCK_VIDEOS:
@@ -210,7 +209,7 @@ def generate():
                     while len(image_prompts) < len(media_paths):
                         image_prompts.append(last_prompt)
                 
-                combined_video_path = create_video_from_images_with_ltx(media_paths, image_prompts, final_audio.duration)
+                combined_video_path = create_video_from_images_with_local_ltx(media_paths, image_prompts, final_audio.duration)
 
             # Save final video with unique name
             final_filename = f"output_{uuid4().hex[:8]}.mp4"
@@ -308,7 +307,7 @@ def serve_video(filename):
         return jsonify({"status": "error", "message": "Video not found"}), 404
     
 
-@app.route("/songs")
+@app.route("/api/songs")
 def list_songs(): 
     if not os.path.exists(SONGS_DIR):
         return jsonify({"status": "success", "songs": []})
@@ -317,11 +316,11 @@ def list_songs():
     return jsonify({"status": "success", "songs": files})
 
 
-@app.route("/songs/<path:filename>")
+@app.route("/api/songs/<path:filename>")
 def get_song(filename):  
     return send_from_directory(SONGS_DIR, filename)
 
-@app.route("/voice")
+@app.route("/api/voice")
 def list_voice(): 
     if not os.path.exists(VOICE_DIR):
         return jsonify({"status": "success", "voice": []})
@@ -330,14 +329,14 @@ def list_voice():
     return jsonify({"status": "success", "voice": files})
 
 
-@app.route("/voice/<path:filename>")
+@app.route("/api/voice/<path:filename>")
 def get_voice(filename):  
     return send_from_directory(VOICE_DIR, filename)
-
 
 
 # ============================
 # Run server
 # ============================
 if __name__ == "__main__":
+    print(colored(f"[INFO] Server is running on http://{HOST}:{PORT}", "green"))
     app.run(debug=True, host=HOST, port=PORT)

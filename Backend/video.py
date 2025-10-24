@@ -20,7 +20,7 @@ from video_effect.popuptext import create_pop_text_clip
 from video_effect.videomoment import add_shaky_effect, add_subtle_zoom_movement, create_video_from_images
 
 # Configure ImageMagick path
-change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
+change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16\magick.exe"})
 
 load_dotenv("../.env")
 
@@ -72,22 +72,42 @@ def __generate_subtitles_whisper(audio_path: str, model_size: str = "base") -> s
 
 def generate_subtitles(audio_path: str, model_size: str = "base") -> str:
     """
-    Generates subtitles from an audio file using Whisper locally.
+    Generates subtitles from an audio file using Whisper locally, with debug prints.
     """
     def equalize_subtitles(srt_path: str, max_chars: int = 10):
+        print(colored(f"[DEBUG] Equalizing subtitles with max_chars={max_chars}: {srt_path}", "yellow"))
         srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
+        print(colored("[DEBUG] Subtitle equalization complete.", "yellow"))
 
     subtitles_path = f"../subtitles/{uuid.uuid4()}.srt"
+    print(colored(f"[DEBUG] Subtitles will be saved to: {subtitles_path}", "yellow"))
+    print(colored(f"[DEBUG] Using audio file: {audio_path}", "yellow"))
+    print(colored(f"[DEBUG] Using Whisper model: {model_size}", "yellow"))
 
-    subtitles = __generate_subtitles_whisper(audio_path, model_size=model_size)
+    try:
+        subtitles = __generate_subtitles_whisper(audio_path, model_size=model_size)
+        print(colored(f"[DEBUG] Raw subtitles generated:\n{subtitles[:500]}...", "yellow"))  # show first 500 chars
+    except Exception as e:
+        print(colored(f"[ERROR] Whisper transcription failed: {e}", "red"))
+        raise
 
-    with open(subtitles_path, "w", encoding="utf-8") as f:
-        f.write(subtitles)
+    try:
+        with open(subtitles_path, "w", encoding="utf-8") as f:
+            f.write(subtitles)
+        print(colored(f"[DEBUG] Subtitles written to file: {subtitles_path}", "yellow"))
+    except Exception as e:
+        print(colored(f"[ERROR] Failed to write subtitles file: {e}", "red"))
+        raise
 
-    equalize_subtitles(subtitles_path)
-    print(colored("[+] Subtitles generated.", "green"))
+    try:
+        equalize_subtitles(subtitles_path)
+    except Exception as e:
+        print(colored(f"[ERROR] Subtitle equalization failed: {e}", "red"))
+        raise
 
+    print(colored("[+] Subtitles generated successfully.", "green"))
     return subtitles_path
+
 
 
 def combine_videos(video_paths: List[str], max_duration: int, max_clip_duration: int, threads: int) -> str:
