@@ -162,7 +162,6 @@ def tts_hf(
     try:
         for i, chunk in enumerate(chunks, start=1):
             print(f"[tts_hf] Generating chunk {i}/{len(chunks)} ({len(chunk)} chars)...")
-            # call gradio endpoint with default parameters
             result = client.predict(
                 text_input=chunk,
                 audio_prompt_path_input=ref_handle,

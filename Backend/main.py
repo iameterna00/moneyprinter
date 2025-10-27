@@ -17,15 +17,23 @@ from gpt import generate_script, generate_metadata, get_image_search_terms, get_
 from video import combine_videos, generate_subtitles, generate_video, save_video
 from youtube import upload_video
 from apiclient.errors import HttpError
-
+import threading
 load_dotenv("../.env")
 check_env_vars()
 SESSION_ID = os.getenv("TIKTOK_SESSION_ID")
 change_settings({"IMAGEMAGICK_BINARY": os.getenv("IMAGEMAGICK_BINARY")})
 
 app = Flask(__name__)
-CORS(app)
-
+CORS(
+    app,
+    origins=[
+        "https://nepwoop.com",  
+        "http://localhost:5173" 
+    ],
+    methods=["GET", "POST", "OPTIONS", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
+    supports_credentials=True
+)
 HOST = "0.0.0.0"
 PORT = 8000
 
@@ -57,20 +65,55 @@ def safe_parse_json(response: str):
                 return []
         return []
 
+active_tasks = {}
+
+def update_task_progress(task_id, status, progress=None, current_video=None, total_videos=None, message=None):
+    """Update task progress in the shared dictionary"""
+    if task_id not in active_tasks:
+        active_tasks[task_id] = {}
+    
+    active_tasks[task_id]["status"] = status
+    if progress is not None:
+        active_tasks[task_id]["progress"] = progress
+    if current_video is not None:
+        active_tasks[task_id]["current_video"] = current_video
+    if total_videos is not None:
+        active_tasks[task_id]["total_videos"] = total_videos
+    if message is not None:
+        active_tasks[task_id]["message"] = message
+
 # ===========================================
-# Video generation endpoint
+# Video generation endpoint - IMMEDIATE RESPONSE
 # ============================================
 @app.route("/api/generate", methods=["POST"])
 def generate():
+    data = request.get_json()
+    task_id = str(uuid4())
+    
+    # Initialize task
+    update_task_progress(task_id, "processing", progress=0, current_video=0, message="Starting video generation...")
+    
+    # Start processing in background thread
+    thread = threading.Thread(target=background_generation, args=(task_id, data))
+    thread.daemon = True
+    thread.start()
+    
+    # Return immediate response to prevent timeout
+    return jsonify({
+        "status": "processing", 
+        "message": "Video generation has started. Check back in 5–10 minutes for results.",
+        "task_id": task_id
+    })
+
+def background_generation(task_id, data):
+    """Background task that contains your original generation logic"""
     global GENERATING
     try:
         GENERATING = True
-        data = request.get_json()
         
-#=================================================
-# Get custom prompts array 
-#==================================================
-
+        # =================================================
+        # YOUR ORIGINAL GENERATION CODE STARTS HERE
+        # =================================================
         custom_prompts = data.get('customPrompts', [])
         custom_prompts = [p for p in custom_prompts if p and p.strip()]
         use_custom_prompts = len(custom_prompts) > 0
@@ -90,6 +133,7 @@ def generate():
         songsName = data.get('songsName')
         voice = data.get("voiceName")
         video_subject = data.get('videoSubject', '')
+        
         print(colored(f"[SELECTED SONG: {songsName}]", "blue"))
         print(colored(f"[Videos to be generated: {amountofshorts}]", "blue"))
         print(colored(f"   Subject: {video_subject}", "blue"))
@@ -98,20 +142,29 @@ def generate():
         if use_custom_prompts:
             print(colored(f"   Custom prompts count: {len(custom_prompts)}", "blue"))
 
-
-        if not GENERATING:
-            return jsonify({"status": "error", "message": "Video generation was cancelled.", "data": []})
-
         generated_video_paths = []
         
         # ============================
         # LOOP GENERATION
         # ============================
         for video_index in range(amountofshorts):
+            # Check for cancellation at the start of each video
             if not GENERATING:
+                update_task_progress(task_id, "cancelled", message="Video generation was cancelled.")
                 break
                 
             print(colored(f"\n[+] Generating video {video_index + 1} of {amountofshorts}", "green"))
+            
+            # Update progress for current video
+            progress = 10 + (video_index / amountofshorts) * 80
+            update_task_progress(
+                task_id, 
+                "processing", 
+                progress=progress,
+                current_video=video_index + 1,
+                total_videos=amountofshorts,
+                message=f"Generating video {video_index + 1} of {amountofshorts}"
+            )
             
             # Clean temp directories for each video
             clean_dir("../temp/")
@@ -120,6 +173,8 @@ def generate():
             # ============================
             # Generate script
             # ============================
+            update_task_progress(task_id, "processing", message="Generating script...")
+            
             if use_custom_prompts:
                 script = custom_prompts[video_index]  # use specific custom prompt
                 print(colored(f"   Using custom prompt: {script[:100]}...", "blue"))
@@ -135,15 +190,19 @@ def generate():
             # ============================
             # Generate TTS Audio
             # ============================
+            update_task_progress(task_id, "processing", message="Generating audio...")
+            
             # Save the full script as one TTS clip
             tts_path = f"../temp/{uuid4()}.mp3"
-            voice_path = f"../voice/{voice}" if voice else "../Songs/Michel.mp3"
+            voice_path = f"../voice/{voice}" if voice else "../voice/Michel.mp3"
             tts_hf(script, output_file=tts_path, audio_prompt=voice_path)
             final_audio = AudioFileClip(tts_path)
 
             # ===================================
             # Generate subtitles With Time Stamp
             # ==================================
+            update_task_progress(task_id, "processing", message="Generating subtitles...")
+            
             try:
                 subtitles_path = generate_subtitles(
                     audio_path=tts_path,
@@ -155,6 +214,8 @@ def generate():
             # ============================
             # Fetch media based on contentType
             # ============================
+            update_task_progress(task_id, "processing", message="Fetching media content...")
+            
             media_paths = []
             image_prompts = []
             
@@ -195,7 +256,8 @@ def generate():
             # ============================
             # Create video
             # ============================
-            # Initialize n_threads with a default value
+            update_task_progress(task_id, "processing", message="Creating video...")
+            
             n_threads = 1
             
             if contentType == "stock":
@@ -218,8 +280,9 @@ def generate():
             bg_music_path = f"../Songs/{songsName}" if songsName else "../Songs/shadow.mp3"
             bg_music_volume = 0.3
             
-
             # Generate the final video
+            update_task_progress(task_id, "processing", message="Finalizing video...")
+            
             generate_video(
                 combined_video_path, tts_path, subtitles_path,
                 n_threads, subtitles_position, text_color or "#FFFF00", 
@@ -235,12 +298,16 @@ def generate():
             # ============================
             # Generate metadata
             # ============================
+            update_task_progress(task_id, "processing", message="Generating metadata...")
+            
             title, description, keywords = generate_metadata(video_subject, script, ai_model)
 
             # ============================
             # Optional YouTube upload
             # ============================
             if automate_youtube_upload:
+                update_task_progress(task_id, "processing", message="Uploading to YouTube...")
+                
                 client_secrets_file = os.path.abspath("./client_secret.json")
                 if os.path.exists(client_secrets_file):
                     video_metadata = {
@@ -258,23 +325,40 @@ def generate():
 
             print(colored(f"[+] Video {video_index + 1} generated: {final_video_path}!", "green"))
 
-        GENERATING = False
-        
-        if generated_video_paths:
-            # Return only the filenames (not full paths) for security
+        # After loop completion, determine final status
+        if not GENERATING:
+            # Generation was cancelled during the process
+            update_task_progress(task_id, "cancelled", message="Video generation was cancelled.")
+        elif generated_video_paths:
+            # Generation completed successfully
+            GENERATING = False
             video_filenames = [os.path.basename(path) for path in generated_video_paths]
-            return jsonify({
-                "status": "success", 
-                "message": f"{len(generated_video_paths)} videos generated!", 
-                "data": video_filenames
-            })
+            update_task_progress(
+                task_id, 
+                "success", 
+                progress=100,
+                message=f"{len(generated_video_paths)} videos generated!",
+                data=video_filenames
+            )
         else:
-            return jsonify({"status": "error", "message": "No videos were generated.", "data": []})
+            # Generation completed but no videos were created
+            GENERATING = False
+            update_task_progress(task_id, "error", message="No videos were generated.")
 
     except Exception as err:
         print(colored(f"[-] Error: {err}", "red"))
         GENERATING = False
-        return jsonify({"status": "error", "message": str(err), "data": []})
+        update_task_progress(task_id, "error", message=str(err))
+# ===========================================
+# Check generation status
+# ===========================================
+@app.route("/api/generate/status/<task_id>")
+def check_status(task_id):
+    task = active_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "message": "Task not found"})
+    
+    return jsonify(task)
 
 # ============================
 # Cancel generation
@@ -290,7 +374,7 @@ def cancel():
 # List and serve generated videos
 # ============================
 
-@app.route("/videos")
+@app.route("/api/videos")
 def list_videos():
     if not os.path.exists(GENERATED_VIDEOS_DIR):
         return jsonify({"status": "success", "videos": []})
@@ -299,7 +383,7 @@ def list_videos():
     return jsonify({"status": "success", "videos": files})
 
 
-@app.route("/video/<filename>")
+@app.route("/api/video/<filename>")
 def serve_video(filename):
     if os.path.exists(os.path.join(GENERATED_VIDEOS_DIR, filename)):
         return send_from_directory(GENERATED_VIDEOS_DIR, filename)

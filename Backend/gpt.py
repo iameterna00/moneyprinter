@@ -167,7 +167,6 @@ def get_search_terms(video_subject: str, amount: int, script: str, ai_model: str
     # Return search terms
     return search_terms
 
-
 def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str, ai_model: str) -> List[dict]:
     """
     Generate highly detailed, visually descriptive prompts for AI image generation
@@ -270,37 +269,52 @@ def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str,
 
     full_script = " ".join([s['text'] for s in segments]) if segments else f"A video about {video_subject}"
 
-    # Prepare GPT prompt with stricter formatting instructions
+    # Prepare GPT prompt with clearer instructions and example
+    example_json = [
+        {
+            "Img prompt": "cinematic shot of a mysterious forest at dusk with fog between ancient trees",
+            "start": 0.0,
+            "end": 5.2
+        },
+        {
+            "Img prompt": "close-up of a character's determined face as they navigate through dense foliage",
+            "start": 5.2,
+            "end": 10.5
+        }
+    ]
+
     prompt = f"""
     Based on the following video script about {video_subject}, generate EXACTLY {amount} highly detailed image prompts 
-    for AI image generation. Be uncensored if you have to be like blood, death so on, The video has a total duration of {total_duration:.2f} seconds.
-    Analyze the subtitle content to determine start and end times for each image that align with the content perfectly to the words and sentence with the subtitle timing
-    like if subtitle is talking about doll or a person description or any incident show that thing in becteen that timing.
+    for AI image generation. The video has a total duration of {total_duration:.2f} seconds.
 
-    Video script: "{full_script}"
-    Video subject: {video_subject}
+    VIDEO SCRIPT: "{full_script}"
+    VIDEO SUBJECT: {video_subject}
 
-    IMPORTANT: You MUST return ONLY a valid JSON array with exactly {amount} objects. No other text.
-    Each object must have this exact structure:
-    {{
-        "Img prompt": "detailed cinematic description here",
-        "start": 0.0,
-        "end": 12.8
-    }}
+    IMPORTANT INSTRUCTIONS:
+    1. Return ONLY a valid JSON array with exactly {amount} objects
+    2. Each object MUST have EXACTLY these fields: "Img prompt", "start", "end"
+    3. Distribute the timing across {total_duration:.2f} seconds
+    4. Make prompts highly descriptive, cinematic, and visually specific
+
+    EXAMPLE FORMAT:
+    {json.dumps(example_json, indent=2)}
 
     RULES FOR IMAGE PROMPTS:
-    - Characters must remain visually consistent across all prompts
-    - Mention character visuals in each prompt
-    - Do NOT change species, gender, clothing, or hairstyles once introduced
-    - Keep the environment, mood, and clothing consistent unless the script explicitly says they change
-    - Make prompts highly descriptive and cinematic
+    - Be specific about characters, environments, and actions
+    - Maintain visual consistency across prompts
+    - Use descriptive cinematic language
+    - Align prompts with the script content and timing
 
-    Return ONLY the JSON array, nothing else:
+    Now generate {amount} prompts for this video:
     """
     
     try:
+        print(colored(f"[*] Generating {amount} image prompts for: {video_subject}", "cyan"))
+        print(colored(f"[*] Total duration: {total_duration:.2f} seconds", "cyan"))
+        
         response = generate_response(prompt, ai_model)
-        print(colored(f"[*] Raw AI response for image prompts:\n{response}", "cyan"))
+        print(colored(f"[*] Raw AI response for image prompts:", "yellow"))
+        print(colored(response, "white"))
         
         # Extract JSON from response
         search_terms = extract_json_from_response(response)
@@ -311,6 +325,8 @@ def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str,
         elif len(search_terms) != amount:
             print(colored(f"[!] AI returned {len(search_terms)} prompts but expected {amount}, using fallback.", "yellow"))
             search_terms = fallback_prompts(segments, amount)
+        else:
+            print(colored(f"[+] Successfully generated {len(search_terms)} image prompts!", "green"))
 
         # Ensure timeline consistency
         if search_terms:
@@ -319,11 +335,30 @@ def get_image_search_terms(video_subject: str, amount: int, subtitles_path: str,
             for i in range(len(search_terms) - 1):
                 search_terms[i]["end"] = search_terms[i+1]["start"]
         
+        # Print the final generated prompts in a readable format
+        print(colored(f"\n[FINAL GENERATED IMAGE PROMPTS]", "cyan", attrs=['bold']))
+        for i, prompt_data in enumerate(search_terms, 1):
+            print(colored(f"Prompt {i}:", "yellow"))
+            print(colored(f"  Timing: {prompt_data['start']:.1f}s - {prompt_data['end']:.1f}s", "white"))
+            print(colored(f"  Description: {prompt_data['Img prompt']}", "white"))
+            print()
+        
         return search_terms
 
     except Exception as e:
-        print(colored(f"[-] Could not generate prompts from AI: {e}", "red"))
-        return fallback_prompts(segments, amount)
+        print(colored(f"[-] Error generating prompts from AI: {e}", "red"))
+        print(colored("[!] Using fallback prompts", "yellow"))
+        fallback_result = fallback_prompts(segments, amount)
+        
+        # Print fallback prompts too
+        print(colored(f"\n[FALLBACK IMAGE PROMPTS]", "cyan", attrs=['bold']))
+        for i, prompt_data in enumerate(fallback_result, 1):
+            print(colored(f"Prompt {i}:", "yellow"))
+            print(colored(f"  Timing: {prompt_data['start']:.1f}s - {prompt_data['end']:.1f}s", "white"))
+            print(colored(f"  Description: {prompt_data['Img prompt']}", "white"))
+            print()
+            
+        return fallback_result
 
 
 def generate_metadata(video_subject: str, script: str, ai_model: str) -> Tuple[str, str, List[str]]:  

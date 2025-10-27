@@ -83,12 +83,12 @@ def generate_video_from_image_local_ltx(image_path, prompt, duration=4, contentT
 
         # --- Step 1: Change model family ---
 
-        safe_predict("Change model family", current_model_family="wan2_2", api_name="/change_model_family")
+        safe_predict("Change model family", current_model_family="ltxv", api_name="/change_model_family")
         safe_predict(
          "restart",
         api_name="/preload_model_when_switching"
         )
-        safe_predict("Change model", model_choice='ti2v_2_2_fastwan', api_name="/change_model")
+        safe_predict("Change model", model_choice='ltxv_distilled', api_name="/change_model")
 
         # --- Step 2: Refresh image prompt type ---
         safe_predict("Refresh image prompt type", image_prompt_type='', image_prompt_type_radio='', api_name="/refresh_image_prompt_type_radio")
@@ -214,7 +214,7 @@ def generate_video_from_image_local_ltx(image_path, prompt, duration=4, contentT
         )
 
         # --- Step 7: Process prompt and add tasks ---
-        safe_predict("Process prompt and add tasks", model_choice="ti2v_2_2_fastwan", api_name="/process_prompt_and_add_tasks")
+        safe_predict("Process prompt and add tasks", model_choice="ltxv_distilled", api_name="/process_prompt_and_add_tasks")
 
         # --- Step 8: Prepare video generation ---
         safe_predict("Prepare video generation", api_name="/prepare_generate_video")
@@ -304,6 +304,7 @@ def create_video_from_images_with_local_ltx(image_paths, image_prompts_with_timi
     """
     Combine multiple images into a TikTok video using local LTX-Video with fallback handling.
     """
+    print("image prompt============timing",image_prompts_with_timing)
     video_clips = []
 
     # Ensure prompt list matches image list
